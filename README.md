@@ -1,10 +1,10 @@
-# Coding Agent MVP
+# Coding Agent
 
 > 一个极简的 AI 编程助手，用于学习 Agent 开发原理。
 
 ## 项目背景
 
-这是一个从零开始构建的 Coding Agent MVP，用于学习：
+这是一个从零开始构建的 Coding Agent，用于学习：
 
 - Agent 架构设计
 - ReAct 模式实现
@@ -123,19 +123,10 @@ python src/main.py -t "创建一个 hello.py 文件"
 - [VideoCode](https://github.com/MarkTechStation/VideoCode) - 教学向 ReAct Agent
 - [ReAct 论文](https://arxiv.org/abs/2210.03629) - Reasoning + Acting
 
-### 相关概念
-
-| 概念 | 说明 |
-|------|------|
-| **ReAct** | Reasoning + Acting，边想边做 |
-| **MCP** | Model Context Protocol，工具协议 |
-| **Provider** | LLM API 封装层 |
-| **Skill** | 可复用的能力模块 |
-
 ## License
 
 MIT
 
 ---
 
-> 本项目用于学习 Agent 开发，不用于生产环境。
+> 本项目用于学习和记录 Agent 开发
