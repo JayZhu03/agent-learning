@@ -15,7 +15,7 @@ class Config:
     """全局配置类"""
     
     # 版本信息
-    VERSION: str = "1.1.3"
+    VERSION: str = "1.1.4"
     
     # 阿里百炼 API 配置
     API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")

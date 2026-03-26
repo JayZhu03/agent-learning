@@ -182,9 +182,13 @@ class CodingAgent:
                 final_answer = f"错误：解析 Action 失败 - {str(e)}"
                 break
             
-            # 安全显示参数
+            # 安全显示参数（避免 repr() 触发转义错误）
             try:
-                args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args) if args else ''
+                # 使用 str() 而不是 repr()，截断长字符串
+                args_display = ', '.join(
+                    str(a)[:30] + ('...' if len(str(a)) > 30 else '') 
+                    for a in args
+                ) if args else ''
             except Exception:
                 args_display = '(参数显示失败)'
             print(f"\n🔧 执行：{tool_name}({args_display})")
