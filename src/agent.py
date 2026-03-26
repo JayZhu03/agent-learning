@@ -2,6 +2,7 @@
 Agent 核心模块
 
 实现 ReAct 循环：Thought → Action → Observation
+支持会话恢复
 """
 
 import re
@@ -11,7 +12,7 @@ from .tools import Tools
 from .prompts import get_system_prompt
 from .config import Config
 from .permissions import Permissions
-from .memory import Memory
+from .memory import Memory, SessionStatus
 
 
 class CodingAgent:
@@ -62,6 +63,35 @@ class CodingAgent:
         
         # 对话历史
         self.messages = []
+        
+        # 是否是恢复的会话
+        self.is_resumed = False
+    
+    def resume(self, session_id: str = None) -> bool:
+        """
+        恢复会话
+        
+        Args:
+            session_id: 要恢复的会话ID（默认恢复最后一个中断的会话）
+        
+        Returns:
+            是否成功恢复
+        """
+        session = self.memory.resume_session(session_id)
+        if not session:
+            return False
+        
+        self.is_resumed = True
+        
+        # 恢复对话历史
+        self.messages = session.get("messages", [])
+        
+        print(f"\n🔄 已恢复会话: {session.get('id')}")
+        print(f"   任务: {session.get('task', 'Unknown')}")
+        print(f"   已执行: {len(session.get('commands', []))} 个命令")
+        print(f"   已写入: {len(session.get('files_written', []))} 个文件")
+        
+        return True
     
     def run(self, user_input: str) -> str:
         """
@@ -73,8 +103,12 @@ class CodingAgent:
         Returns:
             最终答案
         """
-        # 开始新会话
-        self.memory.start_session(task=user_input)
+        # 如果不是恢复的会话，开始新会话
+        if not self.is_resumed:
+            self.memory.start_session(task=user_input)
+        
+        # 记录用户消息
+        self.memory.add_message("user", user_input)
         
         # 获取记忆上下文
         memory_context = self.memory.get_summary()
@@ -86,11 +120,18 @@ class CodingAgent:
             memory_context=memory_context
         )
         
-        # 初始化消息列表
-        self.messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"<question>{user_input}</question>"}
-        ]
+        # 初始化或恢复消息列表
+        if not self.messages:
+            self.messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"<question>{user_input}</question>"}
+            ]
+        else:
+            # 恢复的会话，添加新消息
+            self.messages.append({"role": "user", "content": f"<question>{user_input}</question>"})
+        
+        # 重置恢复标志
+        self.is_resumed = False
         
         print(f"\n{'='*50}")
         print(f"任务：{user_input}")
@@ -110,6 +151,7 @@ class CodingAgent:
             
             # 添加到消息历史
             self.messages.append({"role": "assistant", "content": response})
+            self.memory.add_message("assistant", response)
             
             # 解析响应
             thought = self._extract_thought(response)
@@ -146,6 +188,11 @@ class CodingAgent:
             # 添加观察结果到消息
             obs_message = f"<observation>{observation}</observation>"
             self.messages.append({"role": "user", "content": obs_message})
+            self.memory.add_message("user", obs_message)
+            
+            # 定期保存（防止中断丢失）
+            if step % 5 == 0:
+                self.memory.save()
         
         # 结束会话
         if step >= Config.MAX_STEPS:
@@ -160,6 +207,15 @@ class CodingAgent:
         self.memory.save()
         
         return final_answer or "任务未完成"
+    
+    def interrupt(self):
+        """
+        中断当前会话（用户退出时调用）
+        保存状态以便后续恢复
+        """
+        if self.memory.get_current_session():
+            self.memory.interrupt_session()
+            print("\n💾 会话已保存，可使用 --resume 恢复")
     
     def _extract_thought(self, text: str) -> Optional[str]:
         """提取 <thought> 标签内容"""

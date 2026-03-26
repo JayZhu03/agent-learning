@@ -14,6 +14,9 @@ load_dotenv()
 class Config:
     """全局配置类"""
     
+    # 版本信息
+    VERSION: str = "1.1.0"
+    
     # 阿里百炼 API 配置
     API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
     BASE_URL: str = os.getenv("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1")

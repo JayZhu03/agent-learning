@@ -6,6 +6,7 @@
 - 历史会话保留
 - 持久上下文跨会话保留
 - 摘要模式节省空间
+- 支持会话恢复
 """
 
 import json
@@ -14,6 +15,14 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+
+
+class SessionStatus:
+    """会话状态"""
+    PENDING = "pending"          # 刚创建
+    ACTIVE = "active"            # 进行中
+    COMPLETED = "completed"      # 正常结束
+    INTERRUPTED = "interrupted"  # 被中断（用户退出）
 
 
 class Memory:
@@ -47,6 +56,7 @@ class Memory:
     MAX_SESSIONS = 20  # 最多保留 20 个历史会话
     MAX_NOTES = 10     # 最多保留 10 条笔记
     MAX_KEY_FILES = 20 # 最多保留 20 个重要文件
+    MAX_MESSAGES = 50  # 每个会话最多保留 50 条消息
     
     def __init__(self, work_directory: str = "."):
         """
@@ -115,14 +125,15 @@ class Memory:
         Returns:
             会话 ID
         """
-        # 如果有当前会话，先结束它
+        # 如果有当前会话，先结束它（标记为中断）
         if self.memory["current_session"]:
-            self.end_session()
+            self.interrupt_session()
         
         # 创建新会话
         session_id = self._generate_id()
         self.memory["current_session"] = {
             "id": session_id,
+            "status": SessionStatus.ACTIVE,
             "started_at": datetime.now().isoformat(),
             "ended_at": None,
             "task": task,
@@ -130,10 +141,37 @@ class Memory:
             "files_read": [],
             "files_written": [],
             "commands": [],
+            "messages": [],       # 对话历史
             "success": None
         }
         
         return session_id
+    
+    def interrupt_session(self):
+        """
+        中断当前会话（用户退出时调用）
+        保存会话状态，以便后续恢复
+        """
+        current = self.memory["current_session"]
+        if not current:
+            return
+        
+        # 标记为中断
+        current["status"] = SessionStatus.INTERRUPTED
+        current["ended_at"] = datetime.now().isoformat()
+        
+        # 添加到历史
+        self.memory["sessions"].append(current)
+        
+        # 限制历史会话数量
+        if len(self.memory["sessions"]) > self.MAX_SESSIONS:
+            self.memory["sessions"] = self.memory["sessions"][-self.MAX_SESSIONS:]
+        
+        # 清空当前会话
+        self.memory["current_session"] = None
+        
+        # 保存
+        self.save()
     
     def end_session(self, summary: str = None, success: bool = True) -> dict:
         """
@@ -151,6 +189,7 @@ class Memory:
             return None
         
         # 结束会话
+        current["status"] = SessionStatus.COMPLETED
         current["ended_at"] = datetime.now().isoformat()
         current["summary"] = summary
         current["success"] = success
@@ -170,6 +209,65 @@ class Memory:
     def get_current_session(self) -> Optional[dict]:
         """获取当前会话"""
         return self.memory["current_session"]
+    
+    def get_interrupted_sessions(self) -> List[dict]:
+        """获取所有中断的会话（可恢复）"""
+        return [
+            s for s in self.memory["sessions"]
+            if s.get("status") == SessionStatus.INTERRUPTED
+        ]
+    
+    def get_last_interrupted_session(self) -> Optional[dict]:
+        """获取最后一个中断的会话"""
+        interrupted = self.get_interrupted_sessions()
+        return interrupted[-1] if interrupted else None
+    
+    def get_session_by_id(self, session_id: str) -> Optional[dict]:
+        """
+        根据ID获取会话
+        
+        Args:
+            session_id: 会话ID
+        
+        Returns:
+            会话数据
+        """
+        # 检查历史会话
+        for session in self.memory["sessions"]:
+            if session.get("id") == session_id:
+                return session
+        return None
+    
+    def resume_session(self, session_id: str = None) -> Optional[dict]:
+        """
+        恢复会话
+        
+        Args:
+            session_id: 要恢复的会话ID（默认恢复最后一个中断的会话）
+        
+        Returns:
+            恢复的会话，或 None
+        """
+        # 找到要恢复的会话
+        if session_id:
+            session = self.get_session_by_id(session_id)
+        else:
+            session = self.get_last_interrupted_session()
+        
+        if not session:
+            return None
+        
+        # 从历史中移除
+        self.memory["sessions"] = [
+            s for s in self.memory["sessions"]
+            if s.get("id") != session.get("id")
+        ]
+        
+        # 设置为当前会话
+        session["status"] = SessionStatus.ACTIVE
+        self.memory["current_session"] = session
+        
+        return session
     
     def get_recent_sessions(self, limit: int = 5) -> List[dict]:
         """获取最近的会话"""
@@ -232,6 +330,42 @@ class Memory:
             "cmd": command[:100],  # 限制长度
             "success": success
         })
+    
+    # === 消息记录 ===
+    
+    def add_message(self, role: str, content: str):
+        """
+        添加消息到当前会话
+        
+        Args:
+            role: 角色 (user/assistant/system)
+            content: 消息内容
+        """
+        current = self.memory["current_session"]
+        if not current:
+            return
+        
+        current["messages"].append({
+            "role": role,
+            "content": content[:2000]  # 限制长度
+        })
+        
+        # 限制消息数量
+        if len(current["messages"]) > self.MAX_MESSAGES:
+            current["messages"] = current["messages"][-self.MAX_MESSAGES:]
+    
+    def get_messages(self) -> List[dict]:
+        """获取当前会话的消息列表"""
+        current = self.memory["current_session"]
+        if not current:
+            return []
+        return current.get("messages", [])
+    
+    def clear_messages(self):
+        """清空当前会话的消息"""
+        current = self.memory["current_session"]
+        if current:
+            current["messages"] = []
     
     # === 笔记 ===
     
@@ -343,8 +477,14 @@ class Memory:
         sessions = self.memory["sessions"]
         lines.append(f"\n📋 历史会话 ({len(sessions)} 个):")
         for sess in sessions[-5:]:
-            status = "✅" if sess.get("success") else "❌"
-            lines.append(f"   {status} {sess.get('task', 'Unknown')[:40]}")
+            status_icon = {
+                SessionStatus.COMPLETED: "✅",
+                SessionStatus.INTERRUPTED: "⏸️",
+                SessionStatus.ACTIVE: "▶️",
+                SessionStatus.PENDING: "⏳"
+            }.get(sess.get("status"), "❓")
+            success_icon = "" if sess.get("success") else "❌" if sess.get("status") == SessionStatus.COMPLETED else ""
+            lines.append(f"   {status_icon} {success_icon} {sess.get('task', 'Unknown')[:40]} ({sess.get('id')})")
         
         # 重要文件
         key_files = self.get_key_files()
