@@ -182,7 +182,11 @@ class CodingAgent:
                 final_answer = f"错误：解析 Action 失败 - {str(e)}"
                 break
             
-            args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args) if args else ''
+            # 安全显示参数
+            try:
+                args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args) if args else ''
+            except Exception:
+                args_display = '(参数显示失败)'
             print(f"\n🔧 执行：{tool_name}({args_display})")
             
             # 执行工具（已集成权限检查和记忆记录）
@@ -303,6 +307,14 @@ class CodingAgent:
         Returns:
             提取的字符串
         """
+        try:
+            return self._do_extract_string_arg(s, normalize_path)
+        except Exception as e:
+            print(f"⚠️ _extract_string_arg 错误: {e}")
+            return s  # 返回原字符串
+    
+    def _do_extract_string_arg(self, s: str, normalize_path: bool = False) -> str:
+        """实际提取逻辑"""
         s = s.strip()
         
         # 如果以引号开始
@@ -338,6 +350,15 @@ class CodingAgent:
         Returns:
             (文件路径, 内容)
         """
+        try:
+            return self._do_parse_write_file_args(args_str)
+        except Exception as e:
+            print(f"⚠️ _parse_write_file_args 错误: {e}")
+            # 返回空内容，避免崩溃
+            return ("unknown", "")
+    
+    def _do_parse_write_file_args(self, args_str: str) -> Tuple[str, str]:
+        """实际解析逻辑"""
         args_str = args_str.strip()
         
         # 情况1: 第一个参数用引号包围
@@ -377,7 +398,7 @@ class CodingAgent:
     
     def _unescape(self, s: str) -> str:
         """
-        处理转义字符
+        处理转义字符 - 只处理常见的转义序列
         
         Args:
             s: 包含转义字符的字符串
@@ -385,20 +406,37 @@ class CodingAgent:
         Returns:
             处理后的字符串
         """
-        # 注意顺序：先处理双反斜杠，避免影响其他转义
-        # 使用 codecs 模块安全处理转义
+        if not s:
+            return s
+        
         try:
-            import codecs
-            # 先替换可能有问题的转义序列
-            # 对于文件内容，只处理常见的转义
+            # 只处理明确的转义序列，不使用 codecs
+            # 注意：先替换双反斜杠保护它们
             result = s
-            # 按顺序替换，先处理双反斜杠保护
-            result = result.replace('\\\\', '\x00')  # 临时占位
-            result = result.replace('\\n', '\n')
-            result = result.replace('\\t', '\t')
-            result = result.replace('\\"', '"')
-            result = result.replace("\\'", "'")
-            result = result.replace('\x00', '\\')  # 恢复为单反斜杠
+            
+            # 使用字典映射，避免多次遍历
+            escape_map = {
+                '\\n': '\n',
+                '\\t': '\t',
+                '\\r': '\r',
+                '\\"': '"',
+                "\\'": "'",
+            }
+            
+            # 先处理双反斜杠（保护它们）
+            DOUBLE_BACKSLASH = '\x00BACKSLASH\x00'
+            result = result.replace('\\\\', DOUBLE_BACKSLASH)
+            
+            # 处理其他转义
+            for old, new in escape_map.items():
+                result = result.replace(old, new)
+            
+            # 恢复双反斜杠为单反斜杠
+            result = result.replace(DOUBLE_BACKSLASH, '\\')
+            
             return result
-        except Exception:
-            return s  # 出错时返回原字符串
+            
+        except Exception as e:
+            # 任何错误都返回原字符串
+            print(f"⚠️ _unescape 错误: {e}")
+            return s

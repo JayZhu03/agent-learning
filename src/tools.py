@@ -221,11 +221,18 @@ class Tools:
         
         # === 权限检查 ===
         if self.permissions:
-            allowed, reason = self.permissions.handle_permission_check(
-                tool_name, *args, interactive=self.interactive
-            )
-            if not allowed:
-                return f"❌ 权限拒绝: {reason}"
+            try:
+                allowed, reason = self.permissions.handle_permission_check(
+                    tool_name, *args, interactive=self.interactive
+                )
+                if not allowed:
+                    return f"❌ 权限拒绝: {reason}"
+            except Exception as e:
+                # 权限检查出错，打印详细错误但允许继续
+                print(f"⚠️ 权限检查错误: {str(e)}")
+                # 非交互模式下拒绝，交互模式下询问
+                if not self.interactive:
+                    return f"❌ 权限检查失败: {str(e)}"
         
         # === 执行工具 ===
         try:
@@ -233,10 +240,16 @@ class Tools:
             
             # === 记录记忆 ===
             if self.memory:
-                self._record_to_memory(tool_name, *args, result=result)
+                try:
+                    self._record_to_memory(tool_name, *args, result=result)
+                except Exception as e:
+                    # 记录记忆失败不影响工具执行
+                    print(f"⚠️ 记录记忆失败: {str(e)}")
             
             return result
         except Exception as e:
+            import traceback
+            traceback.print_exc()  # 打印完整堆栈
             return f"工具执行错误：{str(e)}"
     
     def _record_to_memory(self, tool_name: str, *args, result: str = ""):
