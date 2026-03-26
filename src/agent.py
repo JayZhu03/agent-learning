@@ -175,13 +175,21 @@ class CodingAgent:
                 break
             
             # 解析并执行 Action
-            tool_name, args = self._parse_action(action)
+            try:
+                tool_name, args = self._parse_action(action)
+            except Exception as e:
+                print(f"\n❌ 解析 Action 失败: {str(e)}")
+                final_answer = f"错误：解析 Action 失败 - {str(e)}"
+                break
             
             args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args) if args else ''
             print(f"\n🔧 执行：{tool_name}({args_display})")
             
             # 执行工具（已集成权限检查和记忆记录）
-            observation = self.tools.execute(tool_name, *args)
+            try:
+                observation = self.tools.execute(tool_name, *args)
+            except Exception as e:
+                observation = f"工具执行错误：{str(e)}"
             
             print(f"\n🔍 观察结果：{observation[:500]}{'...' if len(observation) > 500 else ''}")
             
@@ -262,17 +270,17 @@ class CodingAgent:
         
         # run_command: 整个内容就是一个命令字符串
         if tool_name == "run_command":
-            cmd = self._extract_string_arg(args_str)
+            cmd = self._extract_string_arg(args_str, normalize_path=False)
             return (tool_name, (cmd,))
         
         # list_files: 整个内容就是一个目录字符串
         if tool_name == "list_files":
-            directory = self._extract_string_arg(args_str)
+            directory = self._extract_string_arg(args_str, normalize_path=True)
             return (tool_name, (directory,) if directory else ())
         
         # read_file: 整个内容就是一个文件路径
         if tool_name == "read_file":
-            file_path = self._extract_string_arg(args_str)
+            file_path = self._extract_string_arg(args_str, normalize_path=True)
             return (tool_name, (file_path,))
         
         # write_file: 需要两个参数 - 文件路径和内容
@@ -283,13 +291,14 @@ class CodingAgent:
         # 默认处理
         return (tool_name, (args_str,))
     
-    def _extract_string_arg(self, s: str) -> str:
+    def _extract_string_arg(self, s: str, normalize_path: bool = False) -> str:
         """
         从参数字符串中提取单个字符串参数
         处理引号包围的情况
         
         Args:
             s: 参数字符串
+            normalize_path: 是否规范化路径（Windows 反斜杠转正斜杠）
         
         Returns:
             提取的字符串
@@ -302,11 +311,19 @@ class CodingAgent:
             # 找到匹配的结束引号
             for i in range(1, len(s)):
                 if s[i] == quote and (i == 0 or s[i-1] != '\\'):
-                    return s[1:i]
+                    result = s[1:i]
+                    if normalize_path:
+                        result = result.replace('\\', '/')
+                    return result
             # 没找到结束引号，返回去掉首引号的内容
-            return s[1:]
+            result = s[1:]
+            if normalize_path:
+                result = result.replace('\\', '/')
+            return result
         
         # 没有引号，返回整个字符串
+        if normalize_path:
+            s = s.replace('\\', '/')
         return s
     
     def _parse_write_file_args(self, args_str: str) -> Tuple[str, str]:
@@ -334,13 +351,14 @@ class CodingAgent:
                     break
             
             if end_quote > 0:
-                file_path = args_str[1:end_quote]
+                # 路径规范化（Windows 反斜杠转正斜杠）
+                file_path = args_str[1:end_quote].replace('\\', '/')
                 # 找到逗号分隔符
                 rest = args_str[end_quote+1:].strip()
                 if rest.startswith(','):
                     content = rest[1:].strip()
-                    # 去掉内容的首尾引号
-                    content = self._extract_string_arg(content)
+                    # 内容不规范化路径，只提取字符串
+                    content = self._extract_string_arg(content, normalize_path=False)
                     # 处理转义字符
                     content = self._unescape(content)
                     return (file_path, content)
@@ -348,14 +366,14 @@ class CodingAgent:
         # 情况2: 没有引号，按第一个逗号分割
         comma_pos = args_str.find(',')
         if comma_pos > 0:
-            file_path = args_str[:comma_pos].strip()
+            file_path = args_str[:comma_pos].strip().replace('\\', '/')
             content = args_str[comma_pos+1:].strip()
-            content = self._extract_string_arg(content)
+            content = self._extract_string_arg(content, normalize_path=False)
             content = self._unescape(content)
             return (file_path, content)
         
         # 情况3: 只有一个参数
-        return (self._extract_string_arg(args_str), "")
+        return (self._extract_string_arg(args_str, normalize_path=True), "")
     
     def _unescape(self, s: str) -> str:
         """
@@ -367,4 +385,20 @@ class CodingAgent:
         Returns:
             处理后的字符串
         """
-        return s.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+        # 注意顺序：先处理双反斜杠，避免影响其他转义
+        # 使用 codecs 模块安全处理转义
+        try:
+            import codecs
+            # 先替换可能有问题的转义序列
+            # 对于文件内容，只处理常见的转义
+            result = s
+            # 按顺序替换，先处理双反斜杠保护
+            result = result.replace('\\\\', '\x00')  # 临时占位
+            result = result.replace('\\n', '\n')
+            result = result.replace('\\t', '\t')
+            result = result.replace('\\"', '"')
+            result = result.replace("\\'", "'")
+            result = result.replace('\x00', '\\')  # 恢复为单反斜杠
+            return result
+        except Exception:
+            return s  # 出错时返回原字符串
