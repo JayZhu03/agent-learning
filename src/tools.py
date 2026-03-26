@@ -222,15 +222,20 @@ class Tools:
         # === 权限检查 ===
         if self.permissions:
             try:
+                # 对于 write_file，只检查路径，不检查内容（避免转义问题）
+                check_args = args
+                if tool_name == "write_file" and len(args) >= 2:
+                    check_args = (args[0],)  # 只传路径
+                
                 allowed, reason = self.permissions.handle_permission_check(
-                    tool_name, *args, interactive=self.interactive
+                    tool_name, *check_args, interactive=self.interactive
                 )
                 if not allowed:
                     return f"❌ 权限拒绝: {reason}"
             except Exception as e:
                 # 权限检查出错，打印详细错误但允许继续
                 print(f"⚠️ 权限检查错误: {str(e)}")
-                # 非交互模式下拒绝，交互模式下询问
+                # 非交互模式下拒绝，交互模式下继续执行
                 if not self.interactive:
                     return f"❌ 权限检查失败: {str(e)}"
         
@@ -244,7 +249,7 @@ class Tools:
                     self._record_to_memory(tool_name, *args, result=result)
                 except Exception as e:
                     # 记录记忆失败不影响工具执行
-                    print(f"⚠️ 记录记忆失败: {str(e)}")
+                    pass  # 静默处理，不打扰用户
             
             return result
         except Exception as e:

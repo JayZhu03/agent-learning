@@ -234,9 +234,13 @@ class Permissions:
         Returns:
             用户决定: allow/allow_always/deny/deny_always
         """
+        # 安全截断操作描述（避免特殊字符问题）
+        safe_action = action[:100] if len(action) > 100 else action
+        safe_details = details[:100] if len(details) > 100 else details
+        
         print(f"\n⚠️  需要确认操作:")
-        print(f"   操作: {action}")
-        print(f"   详情: {details}")
+        print(f"   操作: {safe_action}")
+        print(f"   详情: {safe_details}")
         print(f"\n   [y] 允许本次")
         print(f"   [Y] 允许本次会话所有相同操作")
         print(f"   [n] 拒绝本次")
@@ -309,7 +313,14 @@ class Permissions:
         # 4. 工具需要询问
         if tool_level == PermissionLevel.ASK:
             if interactive:
-                args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args)
+                # 安全显示参数（避免特殊字符问题）
+                try:
+                    args_display = ', '.join(
+                        str(a)[:30] + ('...' if len(str(a)) > 30 else '') 
+                        for a in args
+                    )
+                except Exception:
+                    args_display = "..."
                 decision = self.ask_user(f"{tool_name}({args_display})", tool_reason)
                 return self._handle_user_decision(decision, f"tool:{tool_name}")
             return (False, f"需要用户确认: {tool_reason}")
