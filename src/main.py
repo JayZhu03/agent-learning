@@ -6,9 +6,30 @@
 
 import click
 import os
+import sys
 from src.config import Config
 from src.agent import CodingAgent
 from src.memory import Memory
+
+
+def check_virtual_env():
+    """检查是否在虚拟环境中运行"""
+    in_venv = (
+        hasattr(sys, 'real_prefix') or  # virtualenv
+        (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)  # venv
+    )
+    
+    if not in_venv:
+        print("\n" + "=" * 50)
+        print("⚠️  建议在虚拟环境中运行")
+        print("=" * 50)
+        print("\n创建并激活虚拟环境：")
+        print("  python3 -m venv venv")
+        print("  source venv/bin/activate   # Linux/macOS")
+        print("  venv\\Scripts\\activate    # Windows")
+        print("\n然后安装依赖：")
+        print("  pip install -r requirements.txt")
+        print("\n" + "=" * 50 + "\n")
 
 
 @click.group(invoke_without_command=True)
@@ -16,6 +37,9 @@ from src.memory import Memory
 @click.pass_context
 def cli(ctx, version):
     """Coding Agent - AI 编程助手"""
+    # 检查虚拟环境
+    check_virtual_env()
+    
     if version:
         print(f"Coding Agent v{Config.VERSION}")
         return
