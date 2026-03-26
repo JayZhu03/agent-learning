@@ -2,7 +2,7 @@
 
 一个极简的 AI Agent，用来学习 Agent 开发。
 
-**版本：1.1.1**
+**版本：1.2**
 
 ## 背景
 
@@ -108,16 +108,28 @@ Thought → Action → Observation → 循环 → Final Answer
 ## 使用方法
 
 ```bash
-# 安装依赖
+# 1. 创建并激活虚拟环境
+python3 -m venv venv
+source venv/bin/activate      # Linux/macOS
+# venv\Scripts\activate       # Windows
+
+# 2. 安装依赖
 pip install -r requirements.txt
 
-# 配置 API Key
+# 3. 配置 API Key
 cp .env.example .env
-# 编辑 .env 填入 API Key
+# 编辑 .env 填入 DASHSCOPE_API_KEY
 
-# 初始化项目
+# 4. 初始化项目（可选）
 python -m src.main init
 
+# 5. 启动 Agent
+python -m src.main run
+```
+
+### CLI 命令
+
+```bash
 # 交互模式
 python -m src.main run
 
@@ -127,11 +139,20 @@ python -m src.main run -t "创建一个 hello.py 文件"
 # 指定工作目录
 python -m src.main run -d /path/to/project
 
+# 恢复中断的会话
+python -m src.main run --resume
+
+# 查看会话列表
+python -m src.main sessions
+
 # 查看记忆
 python -m src.main memory
 
 # 查看权限
 python -m src.main perms
+
+# 查看版本
+python -m src.main -v
 ```
 
 ### 交互模式命令

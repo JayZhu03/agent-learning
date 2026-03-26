@@ -14,8 +14,8 @@ load_dotenv()
 class Config:
     """全局配置类"""
     
-    # 版本信息
-    VERSION: str = "1.1.4"
+    # 版本信息（两位版本号 = 正式版，三位版本号 = 测试版）
+    VERSION: str = "1.2"
     
     # 阿里百炼 API 配置
     API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
