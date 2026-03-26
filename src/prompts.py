@@ -77,7 +77,8 @@ ${tool_list}
 
 def get_system_prompt(
     tool_list: str, 
-    work_directory: str
+    work_directory: str,
+    memory_context: str = ""
 ) -> str:
     """
     生成系统提示
@@ -85,6 +86,7 @@ def get_system_prompt(
     Args:
         tool_list: 工具描述列表
         work_directory: 工作目录
+        memory_context: 记忆上下文（可选）
     
     Returns:
         完整的系统提示
@@ -94,8 +96,14 @@ def get_system_prompt(
     
     # 使用模板替换变量
     template = Template(REACT_SYSTEM_PROMPT)
-    return template.safe_substitute(
+    prompt = template.safe_substitute(
         tool_list=tool_list,
         work_directory=work_directory,
         os_name=os_name
     )
+    
+    # 添加记忆上下文
+    if memory_context:
+        prompt = memory_context + "\n" + prompt
+    
+    return prompt

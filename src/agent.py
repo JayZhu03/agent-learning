@@ -10,6 +10,8 @@ from .provider import LLMProvider
 from .tools import Tools
 from .prompts import get_system_prompt
 from .config import Config
+from .permissions import Permissions
+from .memory import Memory
 
 
 class CodingAgent:
@@ -23,13 +25,20 @@ class CodingAgent:
     4. 循环直到任务完成，输出 Final Answer
     """
     
-    def __init__(self, work_directory: str = "."):
+    def __init__(self, work_directory: str = ".", interactive: bool = True):
         """
         初始化 Agent
         
         Args:
             work_directory: 工作目录
+            interactive: 是否交互模式（影响权限询问）
         """
+        # 初始化权限系统（配置文件在 .agent/permissions.json）
+        self.permissions = Permissions(work_directory=work_directory)
+        
+        # 初始化记忆系统（记忆文件在 .agent/memory.json）
+        self.memory = Memory(work_directory=work_directory)
+        
         # 初始化 LLM 提供者
         self.provider = LLMProvider(
             api_key=Config.API_KEY,
@@ -38,10 +47,18 @@ class CodingAgent:
         )
         
         # 初始化工具集
-        self.tools = Tools(work_directory)
+        self.tools = Tools(
+            work_directory=work_directory,
+            permissions=self.permissions,
+            memory=self.memory
+        )
+        self.tools.set_interactive(interactive)
         
         # 工作目录
         self.work_directory = work_directory
+        
+        # 是否交互模式
+        self.interactive = interactive
         
         # 对话历史
         self.messages = []
@@ -56,10 +73,17 @@ class CodingAgent:
         Returns:
             最终答案
         """
+        # 开始新会话
+        self.memory.start_session(task=user_input)
+        
+        # 获取记忆上下文
+        memory_context = self.memory.get_summary()
+        
         # 生成系统提示
         system_prompt = get_system_prompt(
             tool_list=self.tools.get_tool_description(),
-            work_directory=self.work_directory
+            work_directory=self.work_directory,
+            memory_context=memory_context
         )
         
         # 初始化消息列表
@@ -74,6 +98,9 @@ class CodingAgent:
         
         # ReAct 循环
         step = 0
+        final_answer = None
+        success = False
+        
         while step < Config.MAX_STEPS:
             step += 1
             print(f"--- 步骤 {step} ---")
@@ -96,12 +123,14 @@ class CodingAgent:
             # 检查是否完成
             if final_answer:
                 print(f"\n✅ 最终答案：{final_answer}\n")
-                return final_answer
+                success = True
+                break
             
             # 检查是否有 Action
             if not action:
                 print("\n❌ 错误：模型未输出有效的 Action")
-                return "错误：模型未输出有效的 Action"
+                final_answer = "错误：模型未输出有效的 Action"
+                break
             
             # 解析并执行 Action
             tool_name, args = self._parse_action(action)
@@ -109,7 +138,7 @@ class CodingAgent:
             args_display = ', '.join(repr(a)[:30] + ('...' if len(repr(a)) > 30 else '') for a in args) if args else ''
             print(f"\n🔧 执行：{tool_name}({args_display})")
             
-            # 执行工具
+            # 执行工具（已集成权限检查和记忆记录）
             observation = self.tools.execute(tool_name, *args)
             
             print(f"\n🔍 观察结果：{observation[:500]}{'...' if len(observation) > 500 else ''}")
@@ -118,8 +147,19 @@ class CodingAgent:
             obs_message = f"<observation>{observation}</observation>"
             self.messages.append({"role": "user", "content": obs_message})
         
-        # 超过最大步数
-        return f"已达到最大步数限制（{Config.MAX_STEPS}），任务未完成"
+        # 结束会话
+        if step >= Config.MAX_STEPS:
+            final_answer = f"已达到最大步数限制（{Config.MAX_STEPS}），任务未完成"
+            success = False
+        
+        # 生成摘要（取最终答案的前 200 字符）
+        summary = final_answer[:200] if final_answer else None
+        self.memory.end_session(summary=summary, success=success)
+        
+        # 保存记忆
+        self.memory.save()
+        
+        return final_answer or "任务未完成"
     
     def _extract_thought(self, text: str) -> Optional[str]:
         """提取 <thought> 标签内容"""

@@ -12,18 +12,22 @@
 - LLM 调用
 - 工具系统
 - Prompt 设计
+- 权限系统
+- 记忆系统
 
 ## 项目结构
 
 ```
 coding-agent/
 ├── src/
-│   ├── main.py       # 入口
-│   ├── agent.py      # Agent 核心
-│   ├── provider.py   # LLM 调用
-│   ├── tools.py      # 工具函数
-│   ├── prompts.py    # Prompt 模板
-│   └── config.py     # 配置管理
+│   ├── main.py         # CLI 入口
+│   ├── agent.py        # Agent 核心（ReAct 循环）
+│   ├── provider.py     # LLM 调用封装
+│   ├── tools.py        # 工具函数
+│   ├── prompts.py      # Prompt 模板
+│   ├── config.py       # 配置管理
+│   ├── permissions.py  # 权限系统
+│   └── memory.py       # 记忆系统
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -42,10 +46,12 @@ Thought → Action → Observation → 循环 → Final Answer
 ### 数据流
 
 ```
-用户输入 → System Prompt → LLM → 解析 Action → 执行工具 → 返回结果 → 继续循环
+用户输入 → 记忆上下文 → System Prompt → LLM → 解析 Action → 权限检查 → 执行工具 → 记录记忆 → 返回结果
 ```
 
-## 工具
+## 功能特性
+
+### 工具系统
 
 | 工具 | 功能 |
 |------|------|
@@ -54,14 +60,52 @@ Thought → Action → Observation → 循环 → Final Answer
 | `run_command` | 执行命令 |
 | `list_files` | 列出文件 |
 
+### 权限系统
+
+三级权限：`allow` / `ask` / `deny`
+
+```json
+{
+  "tools": {
+    "read_file": "allow",
+    "write_file": "ask",
+    "run_command": "ask"
+  },
+  "commands": {
+    "ls*": "allow",
+    "git*": "allow",
+    "rm*": "deny",
+    "sudo*": "deny"
+  },
+  "paths": {
+    ".env": "deny",
+    "*.key": "deny"
+  }
+}
+```
+
+### 记忆系统
+
+- **会话隔离**：每次运行 = 新会话
+- **跨会话持久化**：重要文件、笔记、技术栈
+- **记忆文件**：`.agent/memory.json`
+
+```json
+{
+  "project": { "name": "my-project" },
+  "sessions": [...],
+  "current_session": {...},
+  "context": {
+    "key_files": ["app.py"],
+    "notes": ["使用 Flask"],
+    "tech_stack": ["Flask", "SQLite"]
+  }
+}
+```
+
 ## 使用方法
 
 ```bash
-# 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
-venv\Scripts\activate     # Windows
-
 # 安装依赖
 pip install -r requirements.txt
 
@@ -69,9 +113,30 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 填入 API Key
 
-# 运行
-python src/main.py
+# 初始化项目
+python -m src.main init
+
+# 交互模式
+python -m src.main run
+
+# 单次任务
+python -m src.main run -t "创建一个 hello.py 文件"
+
+# 指定工作目录
+python -m src.main run -d /path/to/project
+
+# 查看记忆
+python -m src.main memory
+
+# 查看权限
+python -m src.main perms
 ```
+
+### 交互模式命令
+
+- `/memory` - 查看记忆报告
+- `/reset` - 清空记忆
+- `/note <内容>` - 添加笔记
 
 ## 踩坑记录
 
@@ -82,19 +147,11 @@ python src/main.py
 | 危险命令误判 | 字符串匹配 | 正则单词边界 |
 | 交互程序卡住 | 等待输入 | 不适合 run_command |
 
-## 待实现
+## 架构参考
 
-- 结构化记忆
-- Skill 模块
-- 权限系统
-- 更多工具
-- LSP 集成
-
-## 参考
-
-- [OpenCode](https://github.com/anomalyco/opencode)
-- [VideoCode](https://github.com/MarkTechStation/VideoCode)
-- [ReAct 论文](https://arxiv.org/abs/2210.03629)
+- [OpenCode](https://github.com/anomalyco/opencode) - 记忆系统、会话设计
+- [Claude Code](https://claude.ai/code) - 权限系统
+- [ReAct 论文](https://arxiv.org/abs/2210.03629) - 核心模式
 
 ## License
 

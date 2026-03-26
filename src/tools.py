@@ -7,7 +7,11 @@
 
 import os
 import subprocess
-from typing import List, Callable, Dict
+from typing import List, Callable, Dict, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .permissions import Permissions
+    from .memory import Memory
 
 
 class Tools:
@@ -15,16 +19,28 @@ class Tools:
     工具集合
     
     管理 Agent 可用的所有工具
+    集成权限检查和记忆记录
     """
     
-    def __init__(self, work_directory: str = "."):
+    def __init__(
+        self, 
+        work_directory: str = ".",
+        permissions: Optional["Permissions"] = None,
+        memory: Optional["Memory"] = None
+    ):
         """
         初始化工具集
         
         Args:
             work_directory: 工作目录，所有文件操作都在这个目录下进行
+            permissions: 权限管理器（可选）
+            memory: 记忆管理器（可选）
         """
         self.work_directory = os.path.abspath(work_directory)
+        self.permissions = permissions
+        self.memory = memory
+        self.interactive = True  # 是否交互模式
+        
         self.tools: Dict[str, Callable] = {
             "read_file": self.read_file,
             "write_file": self.write_file,
@@ -203,7 +219,41 @@ class Tools:
         if tool_name not in self.tools:
             return f"错误：未知工具 '{tool_name}'"
         
+        # === 权限检查 ===
+        if self.permissions:
+            allowed, reason = self.permissions.handle_permission_check(
+                tool_name, *args, interactive=self.interactive
+            )
+            if not allowed:
+                return f"❌ 权限拒绝: {reason}"
+        
+        # === 执行工具 ===
         try:
-            return self.tools[tool_name](*args)
+            result = self.tools[tool_name](*args)
+            
+            # === 记录记忆 ===
+            if self.memory:
+                self._record_to_memory(tool_name, *args, result=result)
+            
+            return result
         except Exception as e:
             return f"工具执行错误：{str(e)}"
+    
+    def _record_to_memory(self, tool_name: str, *args, result: str = ""):
+        """记录工具调用到记忆"""
+        if not self.memory:
+            return
+        
+        if tool_name == "read_file" and args:
+            self.memory.record_file_read(args[0])
+        
+        elif tool_name == "write_file" and len(args) >= 2:
+            self.memory.record_file_written(args[0], args[1])
+        
+        elif tool_name == "run_command" and args:
+            success = "成功" in result or "执行成功" in result
+            self.memory.record_command(args[0], success=success)
+    
+    def set_interactive(self, interactive: bool):
+        """设置是否交互模式"""
+        self.interactive = interactive
