@@ -170,8 +170,9 @@ class CodingAgent:
             
             # 检查是否有 Action
             if not action:
-                print("\n❌ 错误：模型未输出有效的 Action")
-                final_answer = "错误：模型未输出有效的 Action"
+                print("\n❌ 错误：模型未输出有效的 Action 或 final_answer")
+                print(f"   模型原始输出:\n   {response[:300]}...")
+                final_answer = "错误：模型格式错误。请确保输出包含 <action> 或 <final_answer> 标签。"
                 break
             
             # 解析并执行 Action
@@ -276,28 +277,155 @@ class CodingAgent:
         
         # === 特殊处理每个工具 ===
         
-        # run_command: 整个内容就是一个命令字符串
-        if tool_name == "run_command":
-            cmd = self._extract_string_arg(args_str, normalize_path=False)
-            return (tool_name, (cmd,))
+        # 单字符串参数工具（整个参数就是一个字符串）
+        single_arg_tools = {
+            "run_command", "list_files", "read_file", "delete_file",
+            "mkdir", "git_status", "git_log", "memory_load", "memory_list",
+            "get_env", "web_search", "ask_user"
+        }
         
-        # list_files: 整个内容就是一个目录字符串
-        if tool_name == "list_files":
-            directory = self._extract_string_arg(args_str, normalize_path=True)
-            return (tool_name, (directory,) if directory else ())
-        
-        # read_file: 整个内容就是一个文件路径
-        if tool_name == "read_file":
-            file_path = self._extract_string_arg(args_str, normalize_path=True)
-            return (tool_name, (file_path,))
+        if tool_name in single_arg_tools:
+            arg = self._extract_string_arg(args_str, normalize_path=False)
+            return (tool_name, (arg,) if arg else ())
         
         # write_file: 需要两个参数 - 文件路径和内容
         if tool_name == "write_file":
             file_path, content = self._parse_write_file_args(args_str)
             return (tool_name, (file_path, content))
         
+        # edit_file: 多参数，需要解析
+        if tool_name == "edit_file":
+            args = self._parse_multi_args(args_str)
+            return (tool_name, tuple(args))
+        
+        # git_diff: 可选参数
+        if tool_name == "git_diff":
+            args = self._parse_multi_args(args_str)
+            return (tool_name, tuple(args))
+        
+        # http_get/http_post: 可能有字典参数
+        if tool_name in ("http_get", "http_post"):
+            args = self._parse_multi_args(args_str)
+            return (tool_name, tuple(args))
+        
+        # memory_save: 多参数
+        if tool_name == "memory_save":
+            args = self._parse_multi_args(args_str)
+            return (tool_name, tuple(args))
+        
+        # search_code/find_files: 多参数
+        if tool_name in ("search_code", "find_files"):
+            args = self._parse_multi_args(args_str)
+            return (tool_name, tuple(args))
+        
         # 默认处理
         return (tool_name, (args_str,))
+    
+    def _parse_multi_args(self, args_str: str) -> list:
+        """
+        解析多参数字符串，支持字符串、数字、布尔值、None、字典
+        
+        Args:
+            args_str: 参数字符串
+        
+        Returns:
+            参数列表
+        """
+        import json
+        args = []
+        current_arg = ""
+        in_quotes = False
+        quote_char = None
+        brace_depth = 0  # 用于处理嵌套的字典/列表
+        
+        for char in args_str:
+            if char in ('"', "'") and not in_quotes and brace_depth == 0:
+                in_quotes = True
+                quote_char = char
+                current_arg += char
+            elif char == quote_char and in_quotes:
+                in_quotes = False
+                quote_char = None
+                current_arg += char
+            elif char in '{[' and not in_quotes:
+                brace_depth += 1
+                current_arg += char
+            elif char in '}]' and not in_quotes:
+                brace_depth -= 1
+                current_arg += char
+            elif char == ',' and not in_quotes and brace_depth == 0:
+                # 分隔符，解析当前参数
+                args.append(self._parse_single_arg(current_arg.strip()))
+                current_arg = ""
+            else:
+                current_arg += char
+        
+        # 最后一个参数
+        if current_arg.strip():
+            args.append(self._parse_single_arg(current_arg.strip()))
+        
+        return args
+    
+    def _parse_single_arg(self, arg: str):
+        """
+        解析单个参数值，支持关键字参数
+        
+        Args:
+            arg: 参数字符串，可能是 "value" 或 "key=value"
+        
+        Returns:
+            解析后的值（关键字参数返回元组 (key, value)）
+        """
+        import json
+        arg = arg.strip()
+        
+        # 空值
+        if not arg or arg == "None":
+            return None
+        
+        # 检查是否是关键字参数 (key=value)
+        # 格式: key="value" 或 key=value 或 key={'dict': 'value'}
+        eq_pos = arg.find('=')
+        if eq_pos > 0:
+            key_part = arg[:eq_pos].strip()
+            value_part = arg[eq_pos+1:].strip()
+            
+            # key 必须是合法的标识符
+            if key_part and (key_part[0].isalpha() or key_part[0] == '_'):
+                is_valid_key = all(c.isalnum() or c == '_' for c in key_part)
+                if is_valid_key:
+                    # 递归解析值
+                    parsed_value = self._parse_single_arg(value_part)
+                    return (key_part, parsed_value)
+        
+        # 布尔值
+        if arg.lower() == "true":
+            return True
+        if arg.lower() == "false":
+            return False
+        
+        # 字符串（带引号）
+        if (arg.startswith('"') and arg.endswith('"')) or \
+           (arg.startswith("'") and arg.endswith("'")):
+            return self._unescape(arg[1:-1])
+        
+        # 数字
+        try:
+            if '.' in arg:
+                return float(arg)
+            return int(arg)
+        except ValueError:
+            pass
+        
+        # 字典/列表
+        if arg.startswith('{') or arg.startswith('['):
+            try:
+                return json.loads(arg)
+            except:
+                pass
+        
+        # 默认作为字符串
+        return arg
     
     def _extract_string_arg(self, s: str, normalize_path: bool = False) -> str:
         """
